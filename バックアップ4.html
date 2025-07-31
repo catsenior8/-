@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>集中タイマー</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #000;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .page {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      flex-grow: 1;
+      padding-top: 25vh;
+      padding-bottom: 60px;
+    }
+    .active {
+      display: flex;
+    }
+    .menu-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background-color: #222;
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 0;
+      z-index: 100;
+    }
+    button {
+      padding: 10px;
+      margin: 10px;
+      width: 60vw;
+      max-width: 300px;
+      font-size: 1rem;
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 5px;
+    }
+    .selected {
+      background-color: #3399ff;
+    }
+    .small-button {
+      width: 100px;
+    }
+    .label {
+      margin-top: 20px;
+    }
+    .break-controls {
+      margin-top: auto;
+      padding-bottom: 60px;
+    }
+  </style>
+</head>
+<body>
+  <div id="time-select" class="page active">
+    <h1>タイマーをセットする</h1>
+    <button onclick="selectDuration(10, this)">10分　まずは始める</button>
+    <button onclick="selectDuration(25, this)">25分　短くスパッと集中</button>
+    <button onclick="selectDuration(50, this)">50分　しっかり長めに</button>
+  </div>
+
+  <div id="category-select" class="page">
+    <h1>集中することの分類</h1>
+    <button onclick="startFocus('勉強')">勉強</button>
+    <button onclick="startFocus('プログラム')">プログラム</button>
+    <button onclick="startFocus('ポーカー')">ポーカー</button>
+    <button onclick="startFocus('イラスト作成')">イラスト作成</button>
+    <button onclick="startFocus('その他')">その他</button>
+  </div>
+
+  <div id="focus-page" class="page">
+    <h1>集中していること <span id="focus-category" style="color: #3399ff;">勉強</span></h1>
+    <h2 id="focus-title">10分集中する</h2>
+    <h2 id="timer">10:00</h2>
+    <button onclick="endFocus()">終了</button>
+    <button onclick="togglePause()" id="pauseBtn">一時停止</button>
+  </div>
+
+  <div id="break-prompt" class="page">
+    <h1>少し休憩しませんか？</h1>
+    <p>開始からの経過時間</p>
+    <h2 id="elapsed-time">00:00</h2>
+    <button onclick="startBreak(1)">1分休憩する</button>
+    <button onclick="startBreak(3)">3分休憩する</button>
+    <button onclick="startBreak(5)">5分休憩する</button>
+    <button onclick="startBreak(10)">10分休憩する</button>
+  </div>
+
+  <div id="break-page" class="page">
+    <h1>休憩</h1>
+    <h2 id="break-title">1分休憩</h2>
+    <h2 id="break-timer">00:00</h2>
+    <button onclick="endBreak()">休憩終了</button>
+    <div class="break-controls">
+      <div class="label">次に集中する時間</div>
+      <div>
+        <button class="small-button" onclick="selectNextDuration(this, 10)">10分</button>
+        <button class="small-button" onclick="selectNextDuration(this, 25)">25分</button>
+        <button class="small-button" onclick="selectNextDuration(this, 50)">50分</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="menu-bar">
+    <button onclick="goToPage('time-select')">集中</button>
+    <button onclick="openBreakPrompt()">休憩</button>
+    <button>記録</button>
+    <button>設定</button>
+  </div>
+
+  <audio id="alarm-sound" src="https://freesound.org/data/previews/348/348654_3248244-lq.mp3"></audio>
+
+  <script>
+    let duration = 0;
+    let timerInterval;
+    let startTime = 0;
+    let pauseStart = null;
+    let accumulatedPause = 0;
+    let focusCategory = "";
+    let nextDuration = null;
+    let lastSelectedDuration = null;
+    let skipElapsed = false;
+
+    function goToPage(id) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+
+      const menuBar = document.querySelector('.menu-bar');
+      if (['focus-page', 'break-prompt', 'break-page'].includes(id)) {
+        menuBar.style.display = 'none';
+      } else {
+        menuBar.style.display = 'flex';
+      }
+
+      if (id === 'break-prompt' && skipElapsed) {
+        document.getElementById('elapsed-time').style.display = 'none';
+        document.querySelector('#break-prompt p').style.display = 'none';
+      } else if (id === 'break-prompt') {
+        document.getElementById('elapsed-time').style.display = '';
+        document.querySelector('#break-prompt p').style.display = '';
+      }
+    }
+
+    function openBreakPrompt() {
+      skipElapsed = true;
+      goToPage('break-prompt');
+    }
+
+    function selectDuration(min, btn) {
+      if (lastSelectedDuration === min) {
+        lastSelectedDuration = null;
+      } else {
+        lastSelectedDuration = min;
+        duration = min;
+        goToPage('category-select');
+      }
+    }
+
+    function startFocus(category) {
+      focusCategory = category;
+      document.getElementById('focus-category').textContent = category;
+      document.getElementById('focus-title').textContent = `${duration}分集中する`;
+      goToPage('focus-page');
+      startTime = Date.now();
+      accumulatedPause = 0;
+      pauseStart = null;
+      updateTimer();
+    }
+
+    function updateTimer() {
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (pauseStart !== null) return;
+        const now = Date.now();
+        const elapsed = now - startTime - accumulatedPause;
+        const remainingMs = duration * 60 * 1000 - elapsed;
+
+        if (remainingMs <= 0) {
+          clearInterval(timerInterval);
+          document.getElementById('alarm-sound').play().catch(() => {});
+          endFocus();
+          return;
+        }
+
+        const remainingSec = Math.floor(remainingMs / 1000);
+        const min = Math.floor(remainingSec / 60).toString().padStart(2, '0');
+        const sec = (remainingSec % 60).toString().padStart(2, '0');
+        document.getElementById('timer').textContent = `${min}:${sec}`;
+      }, 250);
+    }
+
+    function endFocus() {
+      clearInterval(timerInterval);
+      skipElapsed = false;
+      goToPage('break-prompt');
+      updateElapsedTime();
+    }
+
+    function updateElapsedTime() {
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - startTime - accumulatedPause;
+        const elapsedSec = Math.max(0, Math.floor(elapsed / 1000));
+        const min = Math.floor(elapsedSec / 60).toString().padStart(2, '0');
+        const sec = (elapsedSec % 60).toString().padStart(2, '0');
+        document.getElementById('elapsed-time').textContent = `${min}:${sec}`;
+      }, 250);
+    }
+
+    function startBreak(min) {
+      clearInterval(timerInterval);
+      document.getElementById('break-title').textContent = `${min}分休憩`;
+      goToPage('break-page');
+      let breakStartTime = Date.now();
+      let breakDurationMs = min * 60 * 1000;
+      timerInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - breakStartTime;
+        const remainingMs = breakDurationMs - elapsed;
+        if (remainingMs <= 0) {
+          clearInterval(timerInterval);
+          endBreak();
+          return;
+        }
+        const remainingSec = Math.floor(remainingMs / 1000);
+        const min = Math.floor(remainingSec / 60).toString().padStart(2, '0');
+        const sec = (remainingSec % 60).toString().padStart(2, '0');
+        document.getElementById('break-timer').textContent = `${min}:${sec}`;
+      }, 250);
+    }
+
+    function endBreak() {
+      clearInterval(timerInterval);
+      document.querySelectorAll('.small-button').forEach(btn => btn.classList.remove('selected'));
+      if (nextDuration !== null) {
+        duration = nextDuration;
+        nextDuration = null;
+        goToPage('focus-page');
+        document.getElementById('focus-category').textContent = focusCategory;
+        document.getElementById('focus-title').textContent = `${duration}分集中する`;
+        startTime = Date.now();
+        accumulatedPause = 0;
+        pauseStart = null;
+        updateTimer();
+      } else {
+        goToPage('time-select');
+      }
+    }
+
+    function togglePause() {
+      if (pauseStart === null) {
+        pauseStart = Date.now();
+        document.getElementById('pauseBtn').textContent = '再開';
+      } else {
+        const pausedDuration = Date.now() - pauseStart;
+        accumulatedPause += pausedDuration;
+        pauseStart = null;
+        document.getElementById('pauseBtn').textContent = '一時停止';
+      }
+    }
+
+    function selectNextDuration(btn, min) {
+      const alreadySelected = btn.classList.contains('selected');
+      document.querySelectorAll('.small-button').forEach(b => b.classList.remove('selected'));
+      if (!alreadySelected) {
+        btn.classList.add('selected');
+        nextDuration = min;
+      } else {
+        nextDuration = null;
+      }
+    }
+  </script>
+</body>
+</html>
